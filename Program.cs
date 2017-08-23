@@ -232,14 +232,14 @@ namespace IncludeTree
             // Parse command line arguments
             foreach (var path in options.I)
             {
-                if (!searchPaths.AddSearchPath(path))
+                if (!string.IsNullOrEmpty(path) && !searchPaths.AddSearchPath(path))
                     Console.WriteLine($"Couldn't add include directory '{path}'");
             }
 
             // Find all cpp and header files
             Console.WriteLine("Finding source files...");
-            IEnumerable<string> cppFilesToSearch = Directory.EnumerateFiles(Environment.CurrentDirectory, "*.cpp");
-            IEnumerable<string> hFilesToSearch = Directory.EnumerateFiles(Environment.CurrentDirectory, "*.h");
+            IEnumerable<string> cppFilesToSearch = Directory.EnumerateFiles(Environment.CurrentDirectory, "*.cpp", SearchOption.AllDirectories);
+            IEnumerable<string> hFilesToSearch = Directory.EnumerateFiles(Environment.CurrentDirectory, "*.h", SearchOption.AllDirectories);
 
             List<string> allFiles = new List<string>();
             allFiles.AddRange(cppFilesToSearch);
