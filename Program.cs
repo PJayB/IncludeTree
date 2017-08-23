@@ -172,7 +172,7 @@ namespace IncludeTree
             StringBuilder str = new StringBuilder();
             while (tabLevel-- > 0)
             {
-                str.Append("  ");
+                str.Append("| ");
             }
             str.Append(content);
             return str.ToString();
@@ -184,12 +184,12 @@ namespace IncludeTree
             {
                 if (visited.Contains(reference.Child.FilePath))
                 {
-                    Console.WriteLine(Tabulate($"Line {reference.LineNumber}: {reference.Child.FilePath} (see above)", tabLevel));
+                    Console.WriteLine(Tabulate($"[{reference.LineNumber}]: {reference.Child.FilePath} (see above)", tabLevel));
                 }
                 else
                 {
                     visited.Add(reference.Child.FilePath);
-                    Console.WriteLine(Tabulate($"Line {reference.LineNumber}: {reference.Child.FilePath}", tabLevel));
+                    Console.WriteLine(Tabulate($"[{reference.LineNumber}]: {reference.Child.FilePath}", tabLevel));
                     PrintNode(reference.Child, tabLevel + 1, visited);
                 }
             }
