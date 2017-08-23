@@ -13,7 +13,7 @@ namespace IncludeTree
     {
         class SearchPaths
         {
-            List<string> _includePaths = new List<string>();
+            HashSet<string> _includePaths = new HashSet<string>();
 
             public bool AddSearchPath(string path)
             {
@@ -23,7 +23,7 @@ namespace IncludeTree
                 if (!Path.IsPathRooted(path))
                     path = Path.GetFullPath(path);
 
-                if (Directory.Exists(path))
+                if (Directory.Exists(path) && !_includePaths.Contains(path))
                 {
                     _includePaths.Add(path);
                     return true;
@@ -34,27 +34,24 @@ namespace IncludeTree
 
             public bool Resolve(string path, out string fullPath)
             {
-                fullPath = path;
+                fullPath = string.Empty;
                 if (string.IsNullOrEmpty(path))
                     return false;
-                if (Path.IsPathRooted(path))
+
+                string sanitizedPath = path.Replace('/', '\\');
+
+                fullPath = sanitizedPath;
+                if (Path.IsPathRooted(fullPath))
                     return File.Exists(fullPath);
-
-                fullPath = Path.GetFullPath(path);
-                if (File.Exists(fullPath))
-                    return true;
-
-                fullPath = Path.Combine(Environment.CurrentDirectory, path);
-                if (File.Exists(fullPath))
-                    return true;
 
                 foreach (var ipath in _includePaths)
                 {
-                    fullPath = Path.Combine(ipath, path);
+                    fullPath = Path.Combine(ipath, sanitizedPath);
                     if (File.Exists(fullPath))
                         return true;
                 }
 
+                // Restore to original and abort
                 fullPath = path;
                 return false;
             }
@@ -81,7 +78,8 @@ namespace IncludeTree
                 FilePath = path;
             }
 
-            public bool Exists { get { return File.Exists(FilePath); } }
+            public bool IsRealFile { get { return File.Exists(FilePath); } }
+            public bool HasChildren { get { return _refs.Count > 0; } }
 
             public string FilePath;
             public IEnumerable<Reference> References { get { return _refs; } }
@@ -111,9 +109,8 @@ namespace IncludeTree
 
             public Node GetNodeForPath(string path)
             {
-                Node tmp = new Node(path);
-                if (_uniqueNodes.ContainsKey(tmp.FilePath))
-                    return _uniqueNodes[tmp.FilePath];
+                if (_uniqueNodes.ContainsKey(path))
+                    return _uniqueNodes[path];
                 else
                     return AddNode(new Node(path));
             }
@@ -139,30 +136,31 @@ namespace IncludeTree
 
             public void BuildHierarchy(Node node)
             {
-                try
+                if (node.IsRealFile)
                 {
-                    using (StreamReader r = new StreamReader(node.FilePath))
+                    try
                     {
-                        for (int lineNum = 1; !r.EndOfStream; lineNum++)
+                        using (StreamReader r = new StreamReader(node.FilePath))
                         {
-                            string line = r.ReadLine();
-
-                            Match match = _searchPattern.Match(line);
-                            if (match != null && match.Groups.Count > 1)
+                            for (int lineNum = 1; !r.EndOfStream; lineNum++)
                             {
-                                // Resolve the path
-                                string resolvedPath;
-                                if (_searchPaths.Resolve(match.Groups[1].Value, out resolvedPath))
+                                string line = r.ReadLine();
+
+                                Match match = _searchPattern.Match(line);
+                                if (match != null && match.Groups.Count > 1)
                                 {
+                                    // Resolve the path
+                                    string resolvedPath;
+                                    _searchPaths.Resolve(match.Groups[1].Value, out resolvedPath);
                                     Node child = GetNodeForPath(resolvedPath);
                                     node.AddChild(child, lineNum);
                                 }
                             }
                         }
                     }
-                }
-                catch (FileNotFoundException)
-                {
+                    catch (FileNotFoundException)
+                    {
+                    }
                 }
             }
         }
@@ -182,37 +180,60 @@ namespace IncludeTree
         {
             foreach (var reference in node.References)
             {
-                if (visited.Contains(reference.Child.FilePath))
+                if (visited.Contains(reference.Child.FilePath) && reference.Child.HasChildren)
                 {
                     Console.WriteLine(Tabulate($"[{reference.LineNumber}]: {reference.Child.FilePath} (see above)", tabLevel));
                 }
                 else
                 {
                     visited.Add(reference.Child.FilePath);
-                    Console.WriteLine(Tabulate($"[{reference.LineNumber}]: {reference.Child.FilePath}", tabLevel));
-                    PrintNode(reference.Child, tabLevel + 1, visited);
+                    if (reference.Child.IsRealFile)
+                    {
+                        Console.WriteLine(Tabulate($"[{reference.LineNumber}]: {reference.Child.FilePath}", tabLevel));
+                        PrintNode(reference.Child, tabLevel + 1, visited);
+                    }
+                    else
+                    {
+                        Console.WriteLine(Tabulate($"[{reference.LineNumber}]: {reference.Child.FilePath} (unresolved)", tabLevel));
+                    }
                 }
             }
         }
+
+        static void SetupDefaultIncludePaths(SearchPaths searchPaths)
+        {
+            searchPaths.AddSearchPath(Environment.CurrentDirectory);
+
+            string[] includePaths = (Environment.GetEnvironmentVariable("INCLUDE") ?? string.Empty).Split(';');
+            foreach (string includePath in includePaths)
+            {
+                if (!searchPaths.AddSearchPath(includePath))
+                    Console.WriteLine($"Couldn't find '{includePath}' specified in %INCLUDE%");
+            }
+        }
+
+        public class CommandLineOptions
+        {
+            public string[] I = new string[0];
+        };
 
         static void Main(string[] args)
         {
             SearchPaths searchPaths = new SearchPaths();
 
+            SetupDefaultIncludePaths(searchPaths);
+
+            CommandLineOptions options = new CommandLineOptions();
+            Utilities.CommandLineSwitchParser commandLineParser = new Utilities.CommandLineSwitchParser();
+
+            // todo: catch exceptions
+            commandLineParser.Parse(args, options);
+
             // Parse command line arguments
-            foreach (var arg in args)
+            foreach (var path in options.I)
             {
-                if (arg.StartsWith("-I"))
-                {
-                    string path = arg.Substring(2);
-                    if (!searchPaths.AddSearchPath(path))
-                        Console.WriteLine($"Couldn't add include directory '{path}'");
-                }
-                else
-                {
-                    Console.WriteLine($"Unknown argument: {arg}");
-                    Environment.Exit(1);
-                }
+                if (!searchPaths.AddSearchPath(path))
+                    Console.WriteLine($"Couldn't add include directory '{path}'");
             }
 
             // Find all cpp and header files
